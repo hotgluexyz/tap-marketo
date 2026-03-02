@@ -13,7 +13,6 @@ import requests
 from hotglue_singer_sdk.typing import AsyncJobStatus
 from hotglue_singer_sdk.exceptions import FatalAPIError
 from memoization import cached
-
 from tap_marketo.auth import MarketoAuthenticator
 
 
@@ -161,7 +160,7 @@ class MarketoStream(AsyncRESTStream):
                 file_path = temp_file.name
                 temp_file.write(csv_body)
 
-            df = pl.read_csv(file_path)
+            df = pl.read_csv(file_path, infer_schema=False)
             for row in df.to_dicts():
                 yield self.get_type_coerced_row(row)
         finally:
@@ -192,7 +191,10 @@ class MarketoStream(AsyncRESTStream):
     def validate_response(self, response: requests.Response) -> None:
         super().validate_response(response)
 
-        # resp_json = response.json()
-        # if resp_json.get("success") is False:
-        #     errors = resp_json.get("errors") or resp_json
-        #     raise FatalAPIError(f"Marketo API error for stream '{self.name}': {errors}")
+        try:
+            resp_json = response.json()
+            if resp_json.get("success") is False:
+                errors = resp_json.get("errors") or resp_json
+                raise FatalAPIError(f"Marketo API error for stream '{self.name}': {errors}")
+        except requests.exceptions.JSONDecodeError:
+            pass

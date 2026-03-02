@@ -2,8 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
-from typing import Any, Dict, Optional
+from typing import Any, Dict
 from urllib.parse import urljoin
 
 from memoization import cached
@@ -95,7 +94,7 @@ class ActivityTypeStream(MarketoStream):
     """Bulk export stream for a single Marketo activity type."""
 
     path = "rest/v1/activities.json"
-    replication_key = "createdAt"
+    replication_key = "activityDate"
     primary_keys = ["marketoGUID"]
 
     bulk_export_create_path = "bulk/v1/activities/export/create.json"
@@ -114,31 +113,22 @@ class ActivityTypeStream(MarketoStream):
     ):
         self.activity_type_id = int(activity_type_id)
         self.name = "event_" + activity_type_name.replace(" ", "_")
-        self.raw_schema = raw_schema
-        self.primary_keys = [pk.get("name") for pk in primary_keys] if primary_keys else None
         super().__init__(*args, **kwargs)
 
     def get_schema(self) -> dict:
-
-        properties: Dict[str, Any] = {
-            "createdAt": {
-                "type": ["null", "string"],
-                "format": "date-time",
-            }
-        }
-        for field in self.raw_schema:
-            name = field.get("name")
-            data_type = field.get("dataType", "string")
-            if name:
-                properties[name] = TYPE_MAP.get(
-                    data_type.lower(), {"type": ["null", "string"]}
-                )
         return {
             "type": "object",
-            "properties": properties,
-            "additionalProperties": True,
+            "properties": {
+                "marketoGUID": {"type": ["null", "string"],},
+                "leadId": {"type": ["null", "string"]},
+                "activityDate": {"type": ["null", "string"], "format": "date-time"},
+                "activityTypeId": {"type": ["null", "string"]},
+                "campaignId": {"type": ["null", "string"]},
+                "primaryAttributeValueId": {"type": ["null", "string"]},
+                "primaryAttributeValue": {"type": ["null", "string"]},
+                "actionResult": {"type": ["null", "string"]},
+            },
         }
-        
 
     def get_async_job_payload(self, context) -> dict:
         """Return payload used by create bulk export job endpoint."""
@@ -148,7 +138,7 @@ class ActivityTypeStream(MarketoStream):
             "fields": [
                     "marketoGUID",
                     "leadId",
-                    "activityDate", 
+                    "activityDate",
                     "activityTypeId",
                     "campaignId",
                     "primaryAttributeValueId",
@@ -156,7 +146,7 @@ class ActivityTypeStream(MarketoStream):
                     "actionResult",
                 ],
             "filter": {
-                self.replication_key: {
+                "createdAt": {
                     "startAt": context["window_start_date"],
                     "endAt": context["window_end_date"],
                 }
