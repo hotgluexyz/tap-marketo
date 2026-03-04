@@ -4,10 +4,8 @@ from __future__ import annotations
 
 from urllib.parse import urljoin
 
-import requests
 
 from hotglue_singer_sdk.authenticators import OAuthAuthenticator, SingletonMeta
-from hotglue_singer_sdk.helpers._util import utc_now
 
 
 

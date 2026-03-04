@@ -2,11 +2,9 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
-from typing import Any, Dict, Optional
+from typing import Any, Dict
 from urllib.parse import urljoin
 
-import requests
 from memoization import cached
 
 from tap_marketo.client import MarketoStream
@@ -28,6 +26,15 @@ TYPE_MAP = {
 }
 
 
+class ActivityTypesHelperStream(MarketoStream):
+    name = "types_helper"
+    path = "rest/v1/activities/types.json"
+    def get_schema(self):
+        return {
+            "properties": {}
+        }
+
+
 class LeadsStream(MarketoStream):
     """Leads stream using Get Leads by Filter Type API."""
 
@@ -37,19 +44,18 @@ class LeadsStream(MarketoStream):
     primary_keys = ["id"]
 
     describe_path = "rest/v1/leads/describe.json"
-    batch_size = 300
+    bulk_export_create_path = "bulk/v1/leads/export/create.json"
+    bulk_export_enqueue_path = "bulk/v1/leads/export/{job_id}/enqueue.json"
+    bulk_export_status_path = "bulk/v1/leads/export/{job_id}/status.json"
+    bulk_export_results_path = "bulk/v1/leads/export/{job_id}/file.json"
 
-
+    @cached
     def get_schema(self) -> dict:
         """Build JSON schema from Marketo lead describe endpoint."""
         base_url = self.config["base_url"].rstrip("/") + "/"
         describe_url = urljoin(base_url, self.describe_path)
-        response = requests.get(describe_url, headers=self.default_headers)
+        response = self.make_request(method="GET", url=describe_url)
         payload = response.json()
-
-        if payload.get("success") is False:
-            errors = payload.get("errors") or payload
-            raise RuntimeError(f"Marketo describe API error: {errors}")
 
         properties: Dict[str, Any] = {}
         for field in payload.get("result", []):
@@ -65,23 +71,86 @@ class LeadsStream(MarketoStream):
             "additionalProperties": True,
         }
 
+    def get_async_job_payload(self, context) -> dict:
+        """Return payload used by create bulk export job endpoint."""
+
+        fields = list(self.schema.get("properties", {}).keys())
+
+        payload = {
+            "format": "CSV",
+            "fields": fields,
+            "filter": {
+                self.replication_key: {
+                    "startAt": context["window_start_date"],
+                    "endAt": context["window_end_date"],
+                }
+            },
+        }
+        payload.update(context)
+        return payload
 
 
-    def get_url_params(
+class ActivityTypeStream(MarketoStream):
+    """Bulk export stream for a single Marketo activity type."""
+
+    path = "rest/v1/activities.json"
+    replication_key = "activityDate"
+    primary_keys = ["marketoGUID"]
+
+    bulk_export_create_path = "bulk/v1/activities/export/create.json"
+    bulk_export_enqueue_path = "bulk/v1/activities/export/{job_id}/enqueue.json"
+    bulk_export_status_path = "bulk/v1/activities/export/{job_id}/status.json"
+    bulk_export_results_path = "bulk/v1/activities/export/{job_id}/file.json"
+
+    def __init__(
         self,
-        context: Optional[dict],
-        next_page_token: Optional[Any],
-    ) -> Dict[str, Any]:
-        """Return request params for Marketo leads endpoint."""
-        params: Dict[str, Any] = {
-            "batchSize": self.batch_size
+        activity_type_id: int,
+        activity_type_name: str,
+        raw_schema: dict,
+        primary_keys: list[dict],
+        *args,
+        **kwargs,
+    ):
+        self.activity_type_id = int(activity_type_id)
+        self.name = "event_" + activity_type_name.replace(" ", "_")
+        super().__init__(*args, **kwargs)
+
+    def get_schema(self) -> dict:
+        return {
+            "type": "object",
+            "properties": {
+                "marketoGUID": {"type": ["null", "string"],},
+                "leadId": {"type": ["null", "string"]},
+                "activityDate": {"type": ["null", "string"], "format": "date-time"},
+                "activityTypeId": {"type": ["null", "string"]},
+                "campaignId": {"type": ["null", "string"]},
+                "primaryAttributeValueId": {"type": ["null", "string"]},
+                "primaryAttributeValue": {"type": ["null", "string"]},
+                "actionResult": {"type": ["null", "string"]},
+            },
         }
 
-        if next_page_token:
-            params["nextPageToken"] = next_page_token
-            return params
+    def get_async_job_payload(self, context) -> dict:
+        """Return payload used by create bulk export job endpoint."""
 
-        # Incremental filter on lead last-modified timestamp.
-        params["filterType"] = "updatedAt"
-        params["filterValues"] = "2026-02-20T00:00:00Z"
-        return params
+        payload = {
+            "format": "CSV",
+            "fields": [
+                    "marketoGUID",
+                    "leadId",
+                    "activityDate",
+                    "activityTypeId",
+                    "campaignId",
+                    "primaryAttributeValueId",
+                    "primaryAttributeValue",
+                    "actionResult",
+                ],
+            "filter": {
+                "createdAt": {
+                    "startAt": context["window_start_date"],
+                    "endAt": context["window_end_date"],
+                }
+            },
+        }
+        payload.update(context)
+        return payload
