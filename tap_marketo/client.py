@@ -86,6 +86,8 @@ class MarketoStream(AsyncRESTStream):
 
 
     def create_async_job(self, context: dict | None = None) -> dict:
+
+        self.logger.info(f"Creating async job for stream '{self.name}', context: {context}")
         create_path = self.bulk_export_create_path
 
         create_url = urljoin(self.url_base, create_path)
@@ -114,6 +116,7 @@ class MarketoStream(AsyncRESTStream):
         return {"job_id": export_id}
 
     def get_async_job_status(self, job_metadata: dict) -> AsyncJobStatus:
+        self.logger.info(f"Getting async job status for stream '{self.name}', job_metadata: {job_metadata}")
         export_id = job_metadata.get("job_id")
         status_path_template = self.bulk_export_status_path
 
@@ -131,6 +134,7 @@ class MarketoStream(AsyncRESTStream):
         return AsyncJobStatus.PENDING
 
     def get_async_job_results(self, job_metadata: Any) -> dict:
+        self.logger.info(f"Getting async job results for stream '{self.name}', job_metadata: {job_metadata}")
         export_id = job_metadata.get("job_id")
         results_path_template = self.bulk_export_results_path
 
@@ -162,12 +166,12 @@ class MarketoStream(AsyncRESTStream):
 
             df = pl.read_csv(file_path, infer_schema=False)
             for row in df.to_dicts():
-                yield self.get_type_coerced_row(row)
+                yield row
         finally:
             if file_path and os.path.exists(file_path):
                 os.remove(file_path)
 
-    def get_type_coerced_row(self, row: dict) -> dict:
+    def post_process(self, row: dict, context) -> dict:
         schema = self.schema
         for key, value in row.items():
             if value == "null":
