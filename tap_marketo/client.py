@@ -127,6 +127,8 @@ class MarketoStream(AsyncRESTStream):
         status_response = self.make_request(method="GET", url=status_url)
         status_payload = status_response.json()
 
+        self.logger.info(f"Status payload: {status_payload}")
+
         result = (status_payload.get("result") or [{}])[0]
         status_value = str(result.get("status", "")).lower()
         if status_value.lower() == "completed":
