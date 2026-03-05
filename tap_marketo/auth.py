@@ -56,33 +56,6 @@ class MarketoAuthenticator(OAuthAuthenticator, metaclass=SingletonMeta):
             return True
         return False
 
-    # def update_access_token(self) -> None:
-    #     """Fetch new access token and write to config file at self._config_file."""
-    #     token_response = requests.get(
-    #         self.auth_endpoint,
-    #         params=self.oauth_request_payload,
-    #     )
-    #     try:
-    #         token_response.raise_for_status()
-    #         self.logger.info("OAuth authorization attempt was successful.")
-    #     except Exception as ex:
-    #         raise RuntimeError(
-    #             f"Failed OAuth login, response was "
-    #             f"'{token_response.text}'. {ex}"
-    #         )
-    #     token_json = token_response.json()
-    #     self.access_token = token_json["access_token"]
-    #     self.expires_in = token_json.get("expires_in")
-    #     request_time = datetime.now(timezone.utc).isoformat()
-    #     self.last_refreshed = request_time
-
-    #     self.config["access_token"] = token_json["access_token"]
-    #     self.config["expires_in"] = token_json.get("expires_in")
-    #     self.config["last_refreshed"] = request_time
-
-    #     if self._config_file is not None:
-    #         with open(self._config_file, "w") as outfile:
-    #             json.dump(self.config, outfile, indent=4)
     # Authentication and refresh
     def update_access_token(self) -> None:
         """Update `access_token` along with: `last_refreshed` and `expires_in`.

@@ -73,8 +73,6 @@ class Tapmarketo(Tap):
     def access_token_support(cls, connector=None):
         """Return authenticator class and auth endpoint for token refresh."""
         authenticator = MarketoAuthenticator
-        #auth_endpoint = "https://420-ULY-655.mktorest.com/identity/oauth/token"
-        #get it from config
         if connector is None:
             base_url = ""  # or a placeholder URL
         else:
