@@ -5,6 +5,7 @@ from urllib.parse import urljoin
 
 from hotglue_singer_sdk import Stream, Tap
 from hotglue_singer_sdk import typing as th
+from hotglue_singer_sdk.helpers.capabilities import AlertingLevel
 
 from tap_marketo.auth import MarketoAuthenticator
 from tap_marketo.streams import (
@@ -23,6 +24,7 @@ class Tapmarketo(Tap):
     """Marketo Engage tap."""
 
     name = "tap-marketo"
+    alerting_level = AlertingLevel.WARNING
 
     config_jsonschema = th.PropertiesList(
         th.Property(
