@@ -8,6 +8,7 @@ from hotglue_singer_sdk import typing as th
 from hotglue_singer_sdk.helpers.capabilities import AlertingLevel
 
 from tap_marketo.auth import MarketoAuthenticator
+from tap_marketo.exceptions import MissingPermissionsError
 from tap_marketo.streams import (
     ActivityTypesHelperStream,
     ActivityTypeStream,
@@ -85,7 +86,12 @@ class Tapmarketo(Tap):
 
     def discover_streams(self) -> List[Stream]:
         """Return a list of discovered streams."""
-        streams = [stream_class(tap=self) for stream_class in BASE_STREAM_TYPES]
+        streams = []
+        for stream_class in BASE_STREAM_TYPES:
+            try:
+                streams.append(stream_class(tap=self))
+            except MissingPermissionsError as e:
+                self.logger.error(f"Error discovering stream {stream_class}: {e}")
 
         helper_stream = ActivityTypesHelperStream(tap=self, name="helper")
         activity_types_url = urljoin(

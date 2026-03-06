@@ -14,6 +14,7 @@ from hotglue_singer_sdk.typing import AsyncJobStatus
 from hotglue_singer_sdk.exceptions import FatalAPIError
 from memoization import cached
 from tap_marketo.auth import MarketoAuthenticator
+from tap_marketo.exceptions import MissingPermissionsError, InvalidCredentialsError
 
 
 class MarketoStream(AsyncRESTStream):
@@ -75,12 +76,59 @@ class MarketoStream(AsyncRESTStream):
         """Return stream authenticator."""
         return MarketoAuthenticator.create_for_stream(self)
 
+    def _is_error_response(
+        self,
+        response: requests.Response,
+        status_code: int,
+        error_code: str | int | None = None,
+    ) -> bool:
+        """True if response has status_code; if error_code given, also require that code in body."""
+        if response.status_code != status_code:
+            return False
+        if error_code is None:
+            return True
+        try:
+            body = response.json()
+        except Exception:
+            return False
+        errors = body.get("errors") if isinstance(body, dict) else []
+        if not isinstance(errors, list):
+            return False
+        return any(
+            isinstance(e, dict) and str(e.get("code")) == str(error_code) for e in errors
+        )
+
+    def _is_authentication_failed_response(self, response: requests.Response) -> bool:
+        """True if response is 401."""
+        return self._is_error_response(response, 401)
+
+    def _is_permission_denied_response(self, response: requests.Response) -> bool:
+        """True if response is 403."""
+        return self._is_error_response(response, 403)
+
+    def _raise_for_marketo_body_errors(self, errors: list, stream_name: str) -> None:
+        """Raise InvalidCredentialsError, or FatalAPIError from errors list."""
+        for e in errors:
+            if not isinstance(e, dict):
+                continue
+            code = str(e.get("code", ""))
+            if code == "601":
+                raise InvalidCredentialsError("Access token invalid.")
+            if code == "602":
+                raise InvalidCredentialsError("Access token expired.")
+
+        raise FatalAPIError(f"Marketo API error for stream '{stream_name}': {errors}")
+
     def parse_response(self, response):
         """Validate Marketo success field before parsing records."""
         payload = response.json()
         if payload.get("success") is False:
             errors = payload.get("errors") or payload
-            raise RuntimeError(f"Marketo API error for stream '{self.name}': {errors}")
+            if isinstance(errors, list):
+                self._raise_for_marketo_body_errors(errors, self.name)
+            raise FatalAPIError(
+                f"Marketo API error for stream '{self.name}': {errors}"
+            )
         return super().parse_response(response)
 
 
@@ -197,10 +245,19 @@ class MarketoStream(AsyncRESTStream):
     def validate_response(self, response: requests.Response) -> None:
         super().validate_response(response)
 
+        if self._is_authentication_failed_response(response):
+            raise InvalidCredentialsError("Incorrect authentication credentials.")
+        if self._is_permission_denied_response(response):
+            raise MissingPermissionsError("You are missing permissions to access this stream.")
+
         try:
             resp_json = response.json()
             if resp_json.get("success") is False:
                 errors = resp_json.get("errors") or resp_json
-                raise FatalAPIError(f"Marketo API error for stream '{self.name}': {errors}")
+                if isinstance(errors, list):
+                    self._raise_for_marketo_body_errors(errors, self.name)
+                raise FatalAPIError(
+                    f"Marketo API error for stream '{self.name}': {errors}"
+                )
         except requests.exceptions.JSONDecodeError:
             pass

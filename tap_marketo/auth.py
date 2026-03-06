@@ -13,6 +13,7 @@ import pendulum
 from hotglue_singer_sdk.helpers._util import utc_now
 from hotglue_singer_sdk.authenticators import OAuthAuthenticator, SingletonMeta
 from hotglue_singer_sdk.streams import Stream as RESTStreamBase
+from tap_marketo.exceptions import InvalidCredentialsError
 
 
 
@@ -61,7 +62,7 @@ class MarketoAuthenticator(OAuthAuthenticator, metaclass=SingletonMeta):
         """Update `access_token` along with: `last_refreshed` and `expires_in`.
 
         Raises:
-            RuntimeError: When OAuth login fails.
+            InvalidCredentialsError: When OAuth login fails.
         """
         request_time = utc_now()
         auth_request_payload = self.oauth_request_payload
@@ -70,9 +71,9 @@ class MarketoAuthenticator(OAuthAuthenticator, metaclass=SingletonMeta):
             token_response.raise_for_status()
             self.logger.info("OAuth authorization attempt was successful.")
         except Exception as ex:
-            raise RuntimeError(
-                f"Failed OAuth login, response was '{token_response.json()}'. {ex}"
-            )
+            raise InvalidCredentialsError(
+                f"Failed OAuth login, response was '{token_response.text}'. {ex}"
+            ) from ex
         token_json = token_response.json()
         self.access_token = token_json["access_token"]
         self.expires_in = token_json.get("expires_in", 10)
