@@ -56,7 +56,6 @@ class MarketoAuthenticator(OAuthAuthenticator, metaclass=SingletonMeta):
             return True
         return False
 
-    # Authentication and refresh
     def update_access_token(self) -> None:
         """Update `access_token` along with: `last_refreshed` and `expires_in`.
 
@@ -75,7 +74,7 @@ class MarketoAuthenticator(OAuthAuthenticator, metaclass=SingletonMeta):
             ) from ex
         token_json = token_response.json()
         self.access_token = token_json["access_token"]
-        self.expires_in = token_json.get("expires_in", 10)
+        self.expires_in = token_json.get("expires_in", None)
         if self.expires_in is None:
             self.logger.debug(
                 "No expires_in receied in OAuth response and no "
@@ -84,7 +83,6 @@ class MarketoAuthenticator(OAuthAuthenticator, metaclass=SingletonMeta):
             )
         self.last_refreshed = request_time
 
-        # store access_token in config file
         self._tap._config["access_token"] = token_json["access_token"]
 
         with open(self._tap.config_file, "w") as outfile:

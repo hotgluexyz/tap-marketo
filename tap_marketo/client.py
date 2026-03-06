@@ -243,13 +243,15 @@ class MarketoStream(AsyncRESTStream):
         return row
 
     def validate_response(self, response: requests.Response) -> None:
-        super().validate_response(response)
+        
 
         if self._is_authentication_failed_response(response):
             raise InvalidCredentialsError("Incorrect authentication credentials.")
         if self._is_permission_denied_response(response):
             raise MissingPermissionsError("You are missing permissions to access this stream.")
 
+        super().validate_response(response)
+        
         try:
             resp_json = response.json()
             if resp_json.get("success") is False:
