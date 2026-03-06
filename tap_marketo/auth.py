@@ -27,7 +27,11 @@ class MarketoAuthenticator(OAuthAuthenticator, metaclass=SingletonMeta):
         oauth_scopes: Optional[str] = None
     ) -> None:
         super().__init__(stream=stream, auth_endpoint=auth_endpoint, oauth_scopes=oauth_scopes)
-        self._tap = stream._tap
+        # self._tap = stream._tap
+        # self.access_token = self._config["access_token"]
+        # self.expires_in = self._config["expires_in"]
+        # self.last_refreshed = self._config["last_refreshed"]
+        
 
     @property
     def oauth_request_payload(self) -> dict:
@@ -51,7 +55,7 @@ class MarketoAuthenticator(OAuthAuthenticator, metaclass=SingletonMeta):
         if not self.expires_in:
             return True
 
-        last_refreshed_dt = self.last_refreshed if isinstance(self.last_refreshed, pendulum.DateTime) else pendulum.parse(self.last_refreshed) # if using pendulum
+        last_refreshed_dt = self.last_refreshed if isinstance(self.last_refreshed, pendulum.DateTime) else pendulum.parse(self.last_refreshed)
         if self.expires_in > (utc_now() - last_refreshed_dt).total_seconds():
             return True
         return False
@@ -84,9 +88,15 @@ class MarketoAuthenticator(OAuthAuthenticator, metaclass=SingletonMeta):
         self.last_refreshed = request_time
 
         self._tap._config["access_token"] = token_json["access_token"]
+        # self._tap._config["expires_in"] = token_json["expires_in"]
+        # self._tap._config["last_refreshed"] = (
+        #     self.last_refreshed.isoformat()
+        #     if hasattr(self.last_refreshed, "isoformat")
+        #     else str(self.last_refreshed)
+        # )
 
-        with open(self._tap.config_file, "w") as outfile:
-            json.dump(self._tap._config, outfile, indent=4)
+        # with open(self._tap.config_file, "w") as outfile:
+        #     json.dump(self._tap._config, outfile, indent=4)
 
     @classmethod
     def create_for_stream(cls, stream) -> "MarketoAuthenticator":
