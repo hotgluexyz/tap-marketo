@@ -119,19 +119,6 @@ class MarketoStream(AsyncRESTStream):
 
         raise FatalAPIError(f"Marketo API error for stream '{stream_name}': {errors}")
 
-    # def parse_response(self, response):
-    #     """Validate Marketo success field before parsing records."""
-    #     payload = response.json()
-    #     if payload.get("success") is False:
-    #         errors = payload.get("errors") or payload
-    #         if isinstance(errors, list):
-    #             self._raise_for_marketo_body_errors(errors, self.name)
-    #         raise FatalAPIError(
-    #             f"Marketo API error for stream '{self.name}': {errors}"
-    #         )
-    #     return super().parse_response(response)
-
-
 
     def create_async_job(self, context: dict | None = None) -> dict:
 
