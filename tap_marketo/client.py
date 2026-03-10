@@ -75,14 +75,6 @@ class MarketoStream(AsyncRESTStream):
         """Return stream authenticator."""
         return MarketoAuthenticator.create_for_stream(self)
 
-    def parse_response(self, response):
-        """Validate Marketo success field before parsing records."""
-        payload = response.json()
-        if payload.get("success") is False:
-            errors = payload.get("errors") or payload
-            raise RuntimeError(f"Marketo API error for stream '{self.name}': {errors}")
-        return super().parse_response(response)
-
 
 
     def create_async_job(self, context: dict | None = None) -> dict:

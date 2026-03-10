@@ -5,7 +5,9 @@ from urllib.parse import urljoin
 
 from hotglue_singer_sdk import Stream, Tap
 from hotglue_singer_sdk import typing as th
+from hotglue_singer_sdk.helpers.capabilities import AlertingLevel
 
+from tap_marketo.auth import MarketoAuthenticator
 from tap_marketo.streams import (
     ActivityTypesHelperStream,
     ActivityTypeStream,
@@ -22,6 +24,7 @@ class Tapmarketo(Tap):
     """Marketo Engage tap."""
 
     name = "tap-marketo"
+    alerting_level = AlertingLevel.WARNING
 
     config_jsonschema = th.PropertiesList(
         th.Property(
@@ -38,6 +41,17 @@ class Tapmarketo(Tap):
             description="Earliest updatedAt timestamp to sync from.",
         ),
     ).to_dict()
+
+    @classmethod
+    def access_token_support(cls, connector=None):
+        """Return authenticator class and auth endpoint for token refresh."""
+        authenticator = MarketoAuthenticator
+        if connector is None:
+            base_url = ""  # or a placeholder URL
+        else:
+            base_url = connector.config.get("base_url", "").rstrip("/") + "/"
+        auth_endpoint = urljoin(base_url or "https://example.mktorest.com/", "identity/oauth/token")
+        return authenticator, auth_endpoint
 
     def discover_streams(self) -> List[Stream]:
         """Return a list of discovered streams."""
