@@ -149,8 +149,9 @@ class ActivityTypeStream(MarketoStream):
                 "createdAt": {
                     "startAt": context["window_start_date"],
                     "endAt": context["window_end_date"],
-                }
-            },
+                },
+                "activityTypeIds": [self.activity_type_id],
+            }
         }
         payload.update(context)
         return payload
