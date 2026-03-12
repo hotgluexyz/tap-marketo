@@ -127,6 +127,7 @@ class ActivityTypeStream(MarketoStream):
                 "primaryAttributeValueId": {"type": ["null", "string"]},
                 "primaryAttributeValue": {"type": ["null", "string"]},
                 "actionResult": {"type": ["null", "string"]},
+                "attributes": {"type": ["null", "object"]},
             },
         }
 
@@ -144,6 +145,7 @@ class ActivityTypeStream(MarketoStream):
                     "primaryAttributeValueId",
                     "primaryAttributeValue",
                     "actionResult",
+                    "attributes"
                 ],
             "filter": {
                 "createdAt": {

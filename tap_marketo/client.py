@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import tempfile
 from datetime import datetime, timedelta, timezone
@@ -184,6 +185,8 @@ class MarketoStream(AsyncRESTStream):
                     row[key] = datetime.strptime(value, "%Y-%m-%dT%H:%M:%SZ")
                 elif "string" in types:
                     row[key] = str(value)
+                elif "object" in types:
+                    row[key] = json.loads(value)
         return row
 
     def validate_response(self, response: requests.Response) -> None:
