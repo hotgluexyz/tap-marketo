@@ -51,7 +51,7 @@ class MarketoStream(AsyncRESTStream):
         return self.config["base_url"].rstrip("/") + "/"
 
     def get_paging_windows(self, context: dict | None) -> list[dict[str, Any]]:
-        start_date = self.get_starting_timestamp(context)
+        start_date = self.get_starting_time(context, is_inclusive=True)
         end_date = datetime.now(timezone.utc).replace(microsecond=0)
 
 
