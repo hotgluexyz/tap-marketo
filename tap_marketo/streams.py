@@ -103,6 +103,7 @@ class CompaniesStream(MarketoRESTStream):
     primary_keys = ["id"]
     replication_key = None
     parent_stream_type = LeadsStream
+    state_partitioning_keys = []
 
     describe_path = "rest/v1/companies/describe.json"
 
