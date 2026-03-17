@@ -11,12 +11,14 @@ from tap_marketo.auth import MarketoAuthenticator
 from tap_marketo.streams import (
     ActivityTypesHelperStream,
     ActivityTypeStream,
-    LeadsStream
+    LeadsStream,
+    CompaniesStream,
 )
 
 
 BASE_STREAM_TYPES = [
     LeadsStream,
+    CompaniesStream,
 ]
 
 

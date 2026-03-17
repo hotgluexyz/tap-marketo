@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 from urllib.parse import urljoin
 
 from memoization import cached
 
-from tap_marketo.client import MarketoStream
+from tap_marketo.client import MarketoAsyncRESTStream, MarketoRESTStream
 
 
 TYPE_MAP = {
@@ -26,7 +26,7 @@ TYPE_MAP = {
 }
 
 
-class ActivityTypesHelperStream(MarketoStream):
+class ActivityTypesHelperStream(MarketoAsyncRESTStream):
     name = "types_helper"
     path = "rest/v1/activities/types.json"
     def get_schema(self):
@@ -35,7 +35,7 @@ class ActivityTypesHelperStream(MarketoStream):
         }
 
 
-class LeadsStream(MarketoStream):
+class LeadsStream(MarketoAsyncRESTStream):
     """Leads stream using Get Leads by Filter Type API."""
 
     name = "leads"
@@ -87,10 +87,84 @@ class LeadsStream(MarketoStream):
             },
         }
         payload.update(context)
-        return payload
+        return payload    
 
+    def get_child_context(self, record: dict, context: Optional[dict]) -> dict:
+        """Return a child context object for a given record."""
+        return {
+            "externalCompanyId": record["externalCompanyId"],
+        }    
 
-class ActivityTypeStream(MarketoStream):
+class CompaniesStream(MarketoRESTStream):
+    """Companies stream; synced as child of LeadsStream by externalCompanyId."""
+
+    name = "companies"
+    path = "rest/v1/companies.json"
+    primary_keys = ["id"]
+    replication_key = None
+    parent_stream_type = LeadsStream
+
+    describe_path = "rest/v1/companies/describe.json"
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._synced_external_company_ids: set = set()
+
+    @cached
+    def get_schema(self) -> dict:
+        """Build JSON schema from Marketo companies describe endpoint."""
+        base_url = self.config["base_url"].rstrip("/") + "/"
+        describe_url = urljoin(base_url, self.describe_path)
+        prepared = self.build_prepared_request(
+            method="GET",
+            url=describe_url,
+        )
+        response = self.request_decorator(self._request)(prepared, None)
+        payload = response.json()
+
+        result_list = payload.get("result", [])
+        if not result_list:
+            return {"type": "object", "properties": {}, "additionalProperties": True}
+
+        properties: Dict[str, Any] = {}
+        for field in result_list[0].get("fields", []):
+            name = field.get("name")
+            data_type = field.get("dataType", "string")
+            if name:
+                properties[name] = TYPE_MAP.get(
+                    data_type.lower(), {"type": ["null", "string"]}
+                )
+        return {
+            "type": "object",
+            "properties": properties,
+            "additionalProperties": True,
+        }
+    
+    def get_url_params(
+        self, context: Optional[dict], next_page_token: Optional[Any] = None
+    ) -> dict:
+        params: Dict[str, Any] = {}
+        externalCompanyId = context and context.get("externalCompanyId")
+
+        params["filterType"] = "externalCompanyId"
+        params["filterValues"] = int(externalCompanyId)
+        props = self.schema.get("properties") or {}
+        if props:
+            params["fields"] = ",".join(props.keys())
+
+        if next_page_token:
+            raise NotImplementedError("Pagination is not necessary for child stream since it's a single record")
+        return params
+    
+    def get_records(self, context):
+        externalCompanyId = (context or {}).get("externalCompanyId")
+        if not externalCompanyId or externalCompanyId in self._synced_external_company_ids:
+            return
+        self._synced_external_company_ids.add(externalCompanyId)
+        yield from super().get_records(context)
+    
+
+class ActivityTypeStream(MarketoAsyncRESTStream):
     """Bulk export stream for a single Marketo activity type."""
 
     path = "rest/v1/activities.json"
