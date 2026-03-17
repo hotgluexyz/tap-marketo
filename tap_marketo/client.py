@@ -9,7 +9,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Iterable
 from urllib.parse import urljoin
 import polars as pl
-from hotglue_singer_sdk.streams import AsyncRESTStream
+from hotglue_singer_sdk.streams import AsyncRESTStream, RESTStream
 import requests
 from hotglue_singer_sdk.typing import AsyncJobStatus
 from hotglue_singer_sdk.exceptions import FatalAPIError
@@ -17,13 +17,67 @@ from memoization import cached
 from tap_marketo.auth import MarketoAuthenticator
 
 
-class MarketoStream(AsyncRESTStream):
-    """Base stream for Marketo REST endpoints."""
+class MarketoRESTStream(RESTStream):
+    """Base for Marketo streams that use sync REST not async jobs."""
 
     def __init__(self, *args, **kwargs):
         self._http_headers: dict = {}
         self._requests_session = requests.Session()
         super().__init__(*args, **kwargs)
+
+    @property
+    def schema(self) -> dict:
+        return self.get_schema()
+
+    @property
+    def url_base(self) -> str:
+        """Return API base URL from config."""
+        return self.config["base_url"].rstrip("/") + "/"
+
+    @property
+    @cached
+    def authenticator(self):
+        """Return stream authenticator."""
+        return MarketoAuthenticator.create_for_stream(self)
+
+    def validate_response(self, response: requests.Response) -> None:
+        super().validate_response(response)
+        try:
+            resp_json = response.json()
+            if resp_json.get("success") is False:
+                errors = resp_json.get("errors") or resp_json
+                raise FatalAPIError(f"Marketo API error for stream '{self.name}': {errors}")
+        except requests.exceptions.JSONDecodeError:
+            pass
+    
+    def post_process(self, row: dict, context) -> dict:
+        schema = self.schema
+        row = row["result"][0]
+        for key, value in row.items():
+            if value is None or value == "None":
+                row[key] = None
+                continue
+            if key in schema["properties"]:
+                types = schema["properties"][key]["type"]
+                is_datetime = schema["properties"][key].get("format") == "date-time"
+                if "integer" in types:
+                    row[key] = int(value)
+                elif "number" in types:
+                    row[key] = float(value)
+                elif "boolean" in types:
+                    row[key] = bool(value)
+                elif is_datetime:
+                    row[key] = datetime.strptime(value, "%Y-%m-%dT%H:%M:%SZ")
+                elif "string" in types:
+                    row[key] = str(value)
+                elif "object" in types:
+                    row[key] = json.loads(value)
+        return row
+
+
+class MarketoAsyncRESTStream(MarketoRESTStream, AsyncRESTStream):
+    """Base stream for Marketo Async REST endpoints."""
+
 
     primary_keys = ["id"]
     replication_key = "updatedAt"
@@ -36,19 +90,10 @@ class MarketoStream(AsyncRESTStream):
     bulk_export_results_path: str | None = None
 
     @property
-    def schema(self) -> dict:
-        return self.get_schema()
-
-    @property
     def default_headers(self) -> dict:
         return {
             **self.authenticator.auth_headers
         }
-
-    @property
-    def url_base(self) -> str:
-        """Return API base URL from config."""
-        return self.config["base_url"].rstrip("/") + "/"
 
     def get_paging_windows(self, context: dict | None) -> list[dict[str, Any]]:
         start_date = self.get_starting_time(context, is_inclusive=True)
@@ -69,14 +114,6 @@ class MarketoStream(AsyncRESTStream):
             current_start = current_end
 
         return windows
-
-    @property
-    @cached
-    def authenticator(self) -> MarketoAuthenticator:
-        """Return stream authenticator."""
-        return MarketoAuthenticator.create_for_stream(self)
-
-
 
     def create_async_job(self, context: dict | None = None) -> dict:
 
@@ -188,14 +225,3 @@ class MarketoStream(AsyncRESTStream):
                 elif "object" in types:
                     row[key] = json.loads(value)
         return row
-
-    def validate_response(self, response: requests.Response) -> None:
-        super().validate_response(response)
-
-        try:
-            resp_json = response.json()
-            if resp_json.get("success") is False:
-                errors = resp_json.get("errors") or resp_json
-                raise FatalAPIError(f"Marketo API error for stream '{self.name}': {errors}")
-        except requests.exceptions.JSONDecodeError:
-            pass
