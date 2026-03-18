@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, Optional
 from urllib.parse import urljoin
+from hotglue_singer_sdk import typing as th
 
 from memoization import cached
 
@@ -164,6 +165,161 @@ class CompaniesStream(MarketoRESTStream):
         self._synced_external_company_ids.add(externalCompanyId)
         yield from super().get_records(context)
     
+
+class NamedAccountsListStream(MarketoRESTStream):
+    """Companies stream; synced as child of LeadsStream by externalCompanyId."""
+
+    name = "namedAccountLists"
+    path = "rest/v1/namedAccountLists.json"
+    primary_keys = ["marketoGUID"]
+    replication_key = None
+
+    default_fields = [
+        th.Property("seq", th.IntegerType),
+        th.Property("marketoGUID", th.StringType),
+        th.Property("name", th.StringType),
+        th.Property("type", th.StringType),
+        th.Property("updateable", th.BooleanType),
+        th.Property("createdAt", th.DateTimeType),
+        th.Property("updatedAt", th.DateTimeType),
+    ]
+
+    @cached
+    def get_schema(self) -> dict:
+        """No describe endpoint for named account lists; schema from API shape."""
+        schema = dict(th.PropertiesList(*self.default_fields).type_dict)
+        schema["additionalProperties"] = True
+        return schema
+    
+    def get_url_params(
+        self, context: Optional[dict], next_page_token: Optional[Any] = None
+    ) -> dict:
+        params: Dict[str, Any] = {}
+
+        if next_page_token:
+            params["nextPageToken"] = next_page_token
+        return params
+    
+    def get_child_context(self, record: dict, context: Optional[dict]) -> dict:
+        """Return a child context object for a given record."""
+        return {
+            "NamedAccountList_marketoGUID": record["marketoGUID"],
+        }    
+
+class NamedAccountListMembersStream(MarketoRESTStream):
+    """GET /namedAccountList/{listGuid}/namedAccounts.json — members of one list."""
+
+    name = "namedAccountListMembers"
+    path = ""  # URL from get_url only
+    primary_keys = ["marketoGUID"]
+    replication_key = None
+    parent_stream_type = NamedAccountsListStream
+    state_partitioning_keys = []
+
+    @cached
+    def get_schema(self) -> dict:
+        # Tighten when you know the exact member shape from Marketo.
+        return {
+            "type": "object",
+            "properties": {
+                "seq": {"type": ["null", "integer"]},
+                "marketoGUID": {"type": ["null", "string"]},
+                "name": {"type": ["null", "string"]},
+                "createdAt": {"type": ["null", "string"], "format": "date-time"},
+                "updatedAt": {"type": ["null", "string"], "format": "date-time"},
+            },
+            "additionalProperties": True,
+        }
+
+    def get_url(self, context: Optional[dict]) -> str:
+        NamedAccountList_marketoGUID = (context or {}).get("NamedAccountList_marketoGUID")
+        if not NamedAccountList_marketoGUID:
+            return urljoin(self.url_base, "rest/v1/namedAccountLists.json")  # unused; see get_records
+        return urljoin(
+            self.url_base,
+            f"rest/v1/namedAccountList/{NamedAccountList_marketoGUID}/namedAccounts.json",
+        )
+
+    def get_url_params(
+        self, context: Optional[dict], next_page_token: Optional[Any] = None
+    ) -> dict:
+        params: Dict[str, Any] = {}
+        if next_page_token:
+            params["nextPageToken"] = next_page_token
+        return params
+
+
+    def get_child_context(self, record: dict, context: Optional[dict]) -> dict:
+        """Pass account identifier to NamedAccountsStream (adjust key to match filterValues)."""
+        return {
+            "AccountList_marketoGUID": record["marketoGUID"],
+        } 
+        # marketoGUID = record.get("marketoGUID")
+        # if not marketoGUID:
+        #     return {}
+        # return {"named_account_marketoGUID": marketoGUID}
+
+class NamedAccountsStream(MarketoRESTStream):
+    """Named Account stream; synced as child of Named Accounts List by marketoGUID."""
+
+    name = "namedAccounts"
+    path = "rest/v1/namedaccounts.json"
+    primary_keys = ["marketoGUID"]
+    replication_key = None
+    state_partitioning_keys = []
+    parent_stream_type = NamedAccountListMembersStream
+    describe_path = "rest/v1/namedaccounts/describe.json"
+
+    @cached
+    def get_schema(self) -> dict:
+        """Build JSON schema from Marketo companies describe endpoint."""
+        _EXCLUDED_NAMED_ACCOUNT_FIELDS = frozenset({"crmIsDeleted"})
+        base_url = self.config["base_url"].rstrip("/") + "/"
+        describe_url = urljoin(base_url, self.describe_path)
+        prepared = self.build_prepared_request(
+            method="GET",
+            url=describe_url,
+        )
+        response = self.request_decorator(self._request)(prepared, None)
+        payload = response.json()
+
+        result_list = payload.get("result", [])
+        if not result_list:
+            return {"type": "object", "properties": {}, "additionalProperties": True}
+
+        properties: Dict[str, Any] = {}
+        for field in result_list[0].get("fields", []):
+            name = field.get("name")
+            data_type = field.get("dataType", "string")
+            if name and name not in _EXCLUDED_NAMED_ACCOUNT_FIELDS:
+                properties[name] = TYPE_MAP.get(
+                    data_type.lower(), {"type": ["null", "string"]}
+                )
+        return {
+            "type": "object",
+            "properties": properties,
+            "additionalProperties": True,
+        }
+    
+    def get_url_params(
+        self, context: Optional[dict], next_page_token: Optional[Any] = None
+    ) -> dict:
+        params: Dict[str, Any] = {}
+
+        AccountList_marketoGUID = context and context.get("AccountList_marketoGUID")
+        
+        params["filterType"] = "marketoGUID"
+        params["filterValues"] = AccountList_marketoGUID
+        props = self.schema.get("properties") or {}
+        if props:
+            params["fields"] = ",".join(props.keys())
+
+        if next_page_token:
+            raise NotImplementedError("Pagination is not necessary for child stream since it's a single record")
+            #params["nextPageToken"] = next_page_token
+        return params
+
+
 
 class ActivityTypeStream(MarketoAsyncRESTStream):
     """Bulk export stream for a single Marketo activity type."""

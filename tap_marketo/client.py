@@ -15,7 +15,9 @@ from hotglue_singer_sdk.typing import AsyncJobStatus
 from hotglue_singer_sdk.exceptions import FatalAPIError
 from memoization import cached
 from tap_marketo.auth import MarketoAuthenticator
+from typing import TypeVar
 
+_TToken = TypeVar("_TToken")
 
 class MarketoRESTStream(RESTStream):
     """Base for Marketo streams that use sync REST not async jobs."""
@@ -50,11 +52,28 @@ class MarketoRESTStream(RESTStream):
         except requests.exceptions.JSONDecodeError:
             pass
     
+    def parse_response(self, response):
+        payload = response.json()
+        for item in payload.get("result") or []:
+            yield item
+
+    def get_next_page_token(
+        self,
+        response: requests.Response,
+        previous_token: _TToken | None,
+    ) -> _TToken | None:
+        """Return token identifying next page or None if all records have been read.
+        """
+        next_page_token = response.json().get("nextPageToken", None)
+        if next_page_token == previous_token:
+            return None #stop pagination to avoid RuntimeError on request_records
+        return next_page_token
+
     def post_process(self, row: dict, context) -> dict:
         schema = self.schema
-        row = row["result"][0]
+        #row = row["result"][0]
         for key, value in row.items():
-            if value is None or value == "None":
+            if value is None or value in ("None", "null"):
                 row[key] = None
                 continue
             if key in schema["properties"]:
@@ -203,25 +222,25 @@ class MarketoAsyncRESTStream(MarketoRESTStream, AsyncRESTStream):
             if file_path and os.path.exists(file_path):
                 os.remove(file_path)
 
-    def post_process(self, row: dict, context) -> dict:
-        schema = self.schema
-        for key, value in row.items():
-            if value == "null":
-                row[key] = None
-                continue
-            if key in schema["properties"]:
-                types = schema["properties"][key]["type"]
-                is_datetime = schema["properties"][key].get("format") == "date-time"
-                if "integer" in types:
-                    row[key] = int(value)
-                elif "number" in types:
-                    row[key] = float(value)
-                elif "boolean" in types:
-                    row[key] = bool(value)
-                elif is_datetime:
-                    row[key] = datetime.strptime(value, "%Y-%m-%dT%H:%M:%SZ")
-                elif "string" in types:
-                    row[key] = str(value)
-                elif "object" in types:
-                    row[key] = json.loads(value)
-        return row
+    # def post_process(self, row: dict, context) -> dict:
+    #     schema = self.schema
+    #     for key, value in row.items():
+    #         if value == "null":
+    #             row[key] = None
+    #             continue
+    #         if key in schema["properties"]:
+    #             types = schema["properties"][key]["type"]
+    #             is_datetime = schema["properties"][key].get("format") == "date-time"
+    #             if "integer" in types:
+    #                 row[key] = int(value)
+    #             elif "number" in types:
+    #                 row[key] = float(value)
+    #             elif "boolean" in types:
+    #                 row[key] = bool(value)
+    #             elif is_datetime:
+    #                 row[key] = datetime.strptime(value, "%Y-%m-%dT%H:%M:%SZ")
+    #             elif "string" in types:
+    #                 row[key] = str(value)
+    #             elif "object" in types:
+    #                 row[key] = json.loads(value)
+    #     return row
