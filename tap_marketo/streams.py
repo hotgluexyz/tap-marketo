@@ -9,7 +9,9 @@ from hotglue_singer_sdk import typing as th
 from memoization import cached
 
 from tap_marketo.client import MarketoAsyncRESTStream, MarketoRESTStream
-
+import copy
+from typing import TypeVar
+_TToken = TypeVar("_TToken")
 
 TYPE_MAP = {
     "string": {"type": ["null", "string"]},
@@ -206,58 +208,6 @@ class NamedAccountsListStream(MarketoRESTStream):
             "NamedAccountList_marketoGUID": record["marketoGUID"],
         }    
 
-class NamedAccountListMembersStream(MarketoRESTStream):
-    """GET /namedAccountList/{listGuid}/namedAccounts.json — members of one list."""
-
-    name = "namedAccountListMembers"
-    path = ""  # URL from get_url only
-    primary_keys = ["marketoGUID"]
-    replication_key = None
-    parent_stream_type = NamedAccountsListStream
-    state_partitioning_keys = []
-
-    @cached
-    def get_schema(self) -> dict:
-        # Tighten when you know the exact member shape from Marketo.
-        return {
-            "type": "object",
-            "properties": {
-                "seq": {"type": ["null", "integer"]},
-                "marketoGUID": {"type": ["null", "string"]},
-                "name": {"type": ["null", "string"]},
-                "createdAt": {"type": ["null", "string"], "format": "date-time"},
-                "updatedAt": {"type": ["null", "string"], "format": "date-time"},
-            },
-            "additionalProperties": True,
-        }
-
-    def get_url(self, context: Optional[dict]) -> str:
-        NamedAccountList_marketoGUID = (context or {}).get("NamedAccountList_marketoGUID")
-        if not NamedAccountList_marketoGUID:
-            return urljoin(self.url_base, "rest/v1/namedAccountLists.json")  # unused; see get_records
-        return urljoin(
-            self.url_base,
-            f"rest/v1/namedAccountList/{NamedAccountList_marketoGUID}/namedAccounts.json",
-        )
-
-    def get_url_params(
-        self, context: Optional[dict], next_page_token: Optional[Any] = None
-    ) -> dict:
-        params: Dict[str, Any] = {}
-        if next_page_token:
-            params["nextPageToken"] = next_page_token
-        return params
-
-
-    def get_child_context(self, record: dict, context: Optional[dict]) -> dict:
-        """Pass account identifier to NamedAccountsStream (adjust key to match filterValues)."""
-        return {
-            "AccountList_marketoGUID": record["marketoGUID"],
-        } 
-        # marketoGUID = record.get("marketoGUID")
-        # if not marketoGUID:
-        #     return {}
-        # return {"named_account_marketoGUID": marketoGUID}
 
 class NamedAccountsStream(MarketoRESTStream):
     """Named Account stream; synced as child of Named Accounts List by marketoGUID."""
@@ -267,7 +217,7 @@ class NamedAccountsStream(MarketoRESTStream):
     primary_keys = ["marketoGUID"]
     replication_key = None
     state_partitioning_keys = []
-    parent_stream_type = NamedAccountListMembersStream
+    parent_stream_type = NamedAccountsListStream
     describe_path = "rest/v1/namedaccounts/describe.json"
 
     @cached
@@ -301,22 +251,69 @@ class NamedAccountsStream(MarketoRESTStream):
             "additionalProperties": True,
         }
     
+    
+    def _fetch_list_member_guids(self, NamedAccountList_marketoGUID: str) -> list:
+        """GET .../namedAccountList/{list_guid}/namedAccounts.json and collect all account marketoGUIDs."""
+
+        url = urljoin(self.url_base, f"rest/v1/namedAccountList/{NamedAccountList_marketoGUID}/namedAccounts.json")
+        list_NamedAccount_marketoGUID = []
+        
+        next_page_token: _TToken | None = None
+        finished = False
+        decorated_request = self.request_decorator(self._request)
+
+        ##check if we cannot do something as a request_records() in rest.py
+        while not finished:
+            params = {}
+            if next_page_token:
+                params["nextPageToken"] = next_page_token
+            prepared = self.build_prepared_request(method="GET", url=url, params=params)
+            resp = decorated_request(prepared, None)
+            self.validate_response(resp)
+            payload = resp.json()
+            for item in payload.get("result") or []:
+                NamedAccount_marketoGUID = item.get("marketoGUID")
+                if NamedAccount_marketoGUID is not None:
+                    list_NamedAccount_marketoGUID.append(str(NamedAccount_marketoGUID))
+            
+            
+            previous_token = copy.deepcopy(next_page_token)
+            next_page_token = self.get_next_page_token(
+                response=resp, previous_token=previous_token
+            )
+            # Cycle until get_next_page_token() no longer returns a value
+            finished = not next_page_token
+
+        return list_NamedAccount_marketoGUID
+
+
+    def get_records(self, context):
+        ##I will only have one NamedAccountList_marketoGUID per context, this is how the child stream works
+        NamedAccountList_marketoGUID = (context or {}).get("NamedAccountList_marketoGUID")
+
+        list_NamedAccount_marketoGUID = self._fetch_list_member_guids(NamedAccountList_marketoGUID)
+        if not list_NamedAccount_marketoGUID:
+            return
+
+        batch_context = {**(context or {}), "list_NamedAccount_marketoGUID": list_NamedAccount_marketoGUID}
+        yield from super().get_records(batch_context)
+
     def get_url_params(
         self, context: Optional[dict], next_page_token: Optional[Any] = None
     ) -> dict:
         params: Dict[str, Any] = {}
 
-        AccountList_marketoGUID = context and context.get("AccountList_marketoGUID")
+        list_NamedAccount_marketoGUID = context and context.get("list_NamedAccount_marketoGUID")
         
         params["filterType"] = "marketoGUID"
-        params["filterValues"] = AccountList_marketoGUID
+        params["filterValues"] = ",".join(list_NamedAccount_marketoGUID)
+
         props = self.schema.get("properties") or {}
         if props:
             params["fields"] = ",".join(props.keys())
 
         if next_page_token:
-            raise NotImplementedError("Pagination is not necessary for child stream since it's a single record")
-            #params["nextPageToken"] = next_page_token
+            params["nextPageToken"] = next_page_token
         return params
 
 
