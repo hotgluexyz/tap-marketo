@@ -13,7 +13,7 @@ from tap_marketo.streams import (
     ActivityTypeStream,
     LeadsStream,
     CompaniesStream,
-    NamedAccountsListStream,
+    NamedAccountListsStream,
     NamedAccountsStream,
 )
 
@@ -21,7 +21,7 @@ from tap_marketo.streams import (
 BASE_STREAM_TYPES = [
     LeadsStream,
     CompaniesStream,
-    NamedAccountsListStream,
+    NamedAccountListsStream,
     NamedAccountsStream,
 ]
 

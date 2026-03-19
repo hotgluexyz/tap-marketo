@@ -15,12 +15,11 @@ from hotglue_singer_sdk.typing import AsyncJobStatus
 from hotglue_singer_sdk.exceptions import FatalAPIError
 from memoization import cached
 from tap_marketo.auth import MarketoAuthenticator
-from typing import TypeVar
 
-_TToken = TypeVar("_TToken")
 
 class MarketoRESTStream(RESTStream):
     """Base for Marketo streams that use sync REST not async jobs."""
+    next_page_token_jsonpath = "$.nextPageToken"
 
     def __init__(self, *args, **kwargs):
         self._http_headers: dict = {}
@@ -57,21 +56,9 @@ class MarketoRESTStream(RESTStream):
         for item in payload.get("result") or []:
             yield item
 
-    def get_next_page_token(
-        self,
-        response: requests.Response,
-        previous_token: _TToken | None,
-    ) -> _TToken | None:
-        """Return token identifying next page or None if all records have been read.
-        """
-        next_page_token = response.json().get("nextPageToken", None)
-        if next_page_token == previous_token:
-            return None #stop pagination to avoid RuntimeError on request_records
-        return next_page_token
 
     def post_process(self, row: dict, context) -> dict:
         schema = self.schema
-        #row = row["result"][0]
         for key, value in row.items():
             if value is None or value in ("None", "null"):
                 row[key] = None

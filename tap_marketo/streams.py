@@ -4,14 +4,11 @@ from __future__ import annotations
 
 from typing import Any, Dict, Optional
 from urllib.parse import urljoin
-from hotglue_singer_sdk import typing as th
 
 from memoization import cached
 
 from tap_marketo.client import MarketoAsyncRESTStream, MarketoRESTStream
 import copy
-from typing import TypeVar
-_TToken = TypeVar("_TToken")
 
 TYPE_MAP = {
     "string": {"type": ["null", "string"]},
@@ -71,7 +68,6 @@ class LeadsStream(MarketoAsyncRESTStream):
         return {
             "type": "object",
             "properties": properties,
-            "additionalProperties": True,
         }
 
     def get_async_job_payload(self, context) -> dict:
@@ -128,7 +124,7 @@ class CompaniesStream(MarketoRESTStream):
 
         result_list = payload.get("result", [])
         if not result_list:
-            return {"type": "object", "properties": {}, "additionalProperties": True}
+            return {"type": "object", "properties": {},}
 
         properties: Dict[str, Any] = {}
         for field in result_list[0].get("fields", []):
@@ -141,7 +137,6 @@ class CompaniesStream(MarketoRESTStream):
         return {
             "type": "object",
             "properties": properties,
-            "additionalProperties": True,
         }
     
     def get_url_params(
@@ -168,30 +163,28 @@ class CompaniesStream(MarketoRESTStream):
         yield from super().get_records(context)
     
 
-class NamedAccountsListStream(MarketoRESTStream):
-    """Companies stream; synced as child of LeadsStream by externalCompanyId."""
+class NamedAccountListsStream(MarketoRESTStream):
 
-    name = "namedAccountLists"
+    name = "named_Account_Lists"
     path = "rest/v1/namedAccountLists.json"
     primary_keys = ["marketoGUID"]
     replication_key = None
 
-    default_fields = [
-        th.Property("seq", th.IntegerType),
-        th.Property("marketoGUID", th.StringType),
-        th.Property("name", th.StringType),
-        th.Property("type", th.StringType),
-        th.Property("updateable", th.BooleanType),
-        th.Property("createdAt", th.DateTimeType),
-        th.Property("updatedAt", th.DateTimeType),
-    ]
-
     @cached
     def get_schema(self) -> dict:
         """No describe endpoint for named account lists; schema from API shape."""
-        schema = dict(th.PropertiesList(*self.default_fields).type_dict)
-        schema["additionalProperties"] = True
-        return schema
+        return {
+            "type": "object",
+            "properties": {
+                "seq": {"type": ["null", "integer"]},
+                "marketoGUID": {"type": ["null", "string"]},
+                "name": {"type": ["null", "string"]},
+                "type": {"type": ["null", "string"]},
+                "updateable": {"type": ["null", "boolean"]},
+                "createdAt": {"type": ["null", "string"], "format": "date-time"},
+                "updatedAt": {"type": ["null", "string"], "format": "date-time"},
+            },
+        }
     
     def get_url_params(
         self, context: Optional[dict], next_page_token: Optional[Any] = None
@@ -205,25 +198,25 @@ class NamedAccountsListStream(MarketoRESTStream):
     def get_child_context(self, record: dict, context: Optional[dict]) -> dict:
         """Return a child context object for a given record."""
         return {
-            "NamedAccountList_marketoGUID": record["marketoGUID"],
+            "named_account_list_guid": record["marketoGUID"],
         }    
 
 
 class NamedAccountsStream(MarketoRESTStream):
-    """Named Account stream; synced as child of Named Accounts List by marketoGUID."""
-
-    name = "namedAccounts"
+    """Named Account stream; synced as child of Named Account Lists by marketoGUID."""
+    
+    name = "named_Accounts"
     path = "rest/v1/namedaccounts.json"
     primary_keys = ["marketoGUID"]
     replication_key = None
     state_partitioning_keys = []
-    parent_stream_type = NamedAccountsListStream
+    parent_stream_type = NamedAccountListsStream
     describe_path = "rest/v1/namedaccounts/describe.json"
 
     @cached
     def get_schema(self) -> dict:
         """Build JSON schema from Marketo companies describe endpoint."""
-        _EXCLUDED_NAMED_ACCOUNT_FIELDS = frozenset({"crmIsDeleted"})
+        _EXCLUDED_NAMED_ACCOUNT_FIELDS = {"crmIsDeleted"}
         base_url = self.config["base_url"].rstrip("/") + "/"
         describe_url = urljoin(base_url, self.describe_path)
         prepared = self.build_prepared_request(
@@ -235,7 +228,7 @@ class NamedAccountsStream(MarketoRESTStream):
 
         result_list = payload.get("result", [])
         if not result_list:
-            return {"type": "object", "properties": {}, "additionalProperties": True}
+            return {"type": "object", "properties": {},}
 
         properties: Dict[str, Any] = {}
         for field in result_list[0].get("fields", []):
@@ -248,17 +241,16 @@ class NamedAccountsStream(MarketoRESTStream):
         return {
             "type": "object",
             "properties": properties,
-            "additionalProperties": True,
         }
     
     
-    def _fetch_list_member_guids(self, NamedAccountList_marketoGUID: str) -> list:
+    def _fetch_list_member_guids(self, named_account_list_guid: str) -> list:
         """GET .../namedAccountList/{list_guid}/namedAccounts.json and collect all account marketoGUIDs."""
 
-        url = urljoin(self.url_base, f"rest/v1/namedAccountList/{NamedAccountList_marketoGUID}/namedAccounts.json")
-        list_NamedAccount_marketoGUID = []
+        url = urljoin(self.url_base, f"rest/v1/namedAccountList/{named_account_list_guid}/namedAccounts.json")
+        named_account_guids = []
         
-        next_page_token: _TToken | None = None
+        next_page_token = None
         finished = False
         decorated_request = self.request_decorator(self._request)
 
@@ -271,9 +263,8 @@ class NamedAccountsStream(MarketoRESTStream):
             self.validate_response(resp)
             payload = resp.json()
             for item in payload.get("result") or []:
-                NamedAccount_marketoGUID = item.get("marketoGUID")
-                if NamedAccount_marketoGUID is not None:
-                    list_NamedAccount_marketoGUID.append(str(NamedAccount_marketoGUID))
+                named_account_guid = item.get("marketoGUID")
+                named_account_guids.append(named_account_guid)
             
             
             previous_token = copy.deepcopy(next_page_token)
@@ -283,18 +274,18 @@ class NamedAccountsStream(MarketoRESTStream):
             # Cycle until get_next_page_token() no longer returns a value
             finished = not next_page_token
 
-        return list_NamedAccount_marketoGUID
+        return named_account_guids
 
 
     def get_records(self, context):
-        ##I will only have one NamedAccountList_marketoGUID per context, this is how the child stream works
-        NamedAccountList_marketoGUID = (context or {}).get("NamedAccountList_marketoGUID")
+        named_account_list_guid = (context or {}).get("named_account_list_guid")
 
-        list_NamedAccount_marketoGUID = self._fetch_list_member_guids(NamedAccountList_marketoGUID)
-        if not list_NamedAccount_marketoGUID:
+        named_account_guids = self._fetch_list_member_guids(named_account_list_guid)
+        if not named_account_guids:
             return
 
-        batch_context = {**(context or {}), "list_NamedAccount_marketoGUID": list_NamedAccount_marketoGUID}
+        batch_context = (context or {}).copy()
+        batch_context["named_account_guids"] = named_account_guids
         yield from super().get_records(batch_context)
 
     def get_url_params(
@@ -302,10 +293,10 @@ class NamedAccountsStream(MarketoRESTStream):
     ) -> dict:
         params: Dict[str, Any] = {}
 
-        list_NamedAccount_marketoGUID = context and context.get("list_NamedAccount_marketoGUID")
+        named_account_guids = context and context.get("named_account_guids")
         
         params["filterType"] = "marketoGUID"
-        params["filterValues"] = ",".join(list_NamedAccount_marketoGUID)
+        params["filterValues"] = ",".join(named_account_guids)
 
         props = self.schema.get("properties") or {}
         if props:
