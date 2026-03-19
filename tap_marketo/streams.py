@@ -262,7 +262,6 @@ class NamedAccountsStream(MarketoRESTStream):
         finished = False
         decorated_request = self.request_decorator(self._request)
 
-        ##check if we cannot do something as a request_records() in rest.py
         while not finished:
             params = {}
             if next_page_token:
