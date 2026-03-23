@@ -19,6 +19,7 @@ from tap_marketo.auth import MarketoAuthenticator
 
 class MarketoRESTStream(RESTStream):
     """Base for Marketo streams that use sync REST not async jobs."""
+    next_page_token_jsonpath = "$.nextPageToken"
 
     def __init__(self, *args, **kwargs):
         self._http_headers: dict = {}
@@ -50,11 +51,16 @@ class MarketoRESTStream(RESTStream):
         except requests.exceptions.JSONDecodeError:
             pass
     
+    def parse_response(self, response):
+        payload = response.json()
+        for item in payload.get("result") or []:
+            yield item
+
+
     def post_process(self, row: dict, context) -> dict:
         schema = self.schema
-        row = row["result"][0]
         for key, value in row.items():
-            if value is None or value == "None":
+            if value is None or value in ("None", "null"):
                 row[key] = None
                 continue
             if key in schema["properties"]:
@@ -202,26 +208,3 @@ class MarketoAsyncRESTStream(MarketoRESTStream, AsyncRESTStream):
         finally:
             if file_path and os.path.exists(file_path):
                 os.remove(file_path)
-
-    def post_process(self, row: dict, context) -> dict:
-        schema = self.schema
-        for key, value in row.items():
-            if value == "null":
-                row[key] = None
-                continue
-            if key in schema["properties"]:
-                types = schema["properties"][key]["type"]
-                is_datetime = schema["properties"][key].get("format") == "date-time"
-                if "integer" in types:
-                    row[key] = int(value)
-                elif "number" in types:
-                    row[key] = float(value)
-                elif "boolean" in types:
-                    row[key] = bool(value)
-                elif is_datetime:
-                    row[key] = datetime.strptime(value, "%Y-%m-%dT%H:%M:%SZ")
-                elif "string" in types:
-                    row[key] = str(value)
-                elif "object" in types:
-                    row[key] = json.loads(value)
-        return row
