@@ -10,6 +10,7 @@ from hotglue_singer_sdk.authenticators import OAuthAuthenticator, SingletonMeta
 
 import json
 import requests
+import re
 from hotglue_singer_sdk.helpers._util import utc_now
 from hotglue_etl_exceptions import InvalidCredentialsError
 
@@ -45,7 +46,11 @@ class MarketoAuthenticator(OAuthAuthenticator, metaclass=SingletonMeta):
         token_response = requests.post(self.auth_endpoint, data=auth_request_payload, auth=self.request_auth())
         try:
             token_response.raise_for_status()
-            self.logger.info(f"OAuth authorization attempt was successful, response was '{token_response.text}'")
+            token_text = token_response.text or ""
+            token_text = re.sub(r'("access_token"\s*:\s*")([^"]*)(".*?"token_type")',
+                                lambda m: m.group(1) + (m.group(2)[:8] + ("*" * max(0, len(m.group(2)) - 8))) + m.group(3),
+                                token_text, count=1) or token_text
+            self.logger.info(f"OAuth authorization attempt was successful, response was '{token_text}'")
         except Exception as ex:
             raise InvalidCredentialsError(
                 f"Failed OAuth login, response was '{token_response.text}'. {ex}"
