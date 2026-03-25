@@ -64,10 +64,6 @@ class MarketoAuthenticator(OAuthAuthenticator, metaclass=SingletonMeta):
         # Update the tap config with the new access_token and refresh_token
         self._tap._config["access_token"] = token_json["access_token"]
         self._tap._config["expires_in"] = self.expires_in
-        if token_json.get("refresh_token"):
-            # Log the refresh_token
-            self._tap.logger.info(f"Latest refresh token: {token_json.get('refresh_token')}")
-            self._tap._config["refresh_token"] = token_json["refresh_token"]
 
         # Write the updated config back to the file (only when config was loaded from a path)
         if self._tap.config_file is not None:
