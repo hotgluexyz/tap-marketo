@@ -45,7 +45,7 @@ class MarketoAuthenticator(OAuthAuthenticator, metaclass=SingletonMeta):
         token_response = requests.post(self.auth_endpoint, data=auth_request_payload, auth=self.request_auth())
         try:
             token_response.raise_for_status()
-            self.logger.info(f"OAuth authorization attempt was successful, response was '{token_response.text}")
+            self.logger.info(f"OAuth authorization attempt was successful, response was '{token_response.text}'")
         except Exception as ex:
             raise InvalidCredentialsError(
                 f"Failed OAuth login, response was '{token_response.text}'. {ex}"
