@@ -8,7 +8,11 @@ from urllib.parse import urljoin
 from hotglue_singer_sdk.authenticators import OAuthAuthenticator, SingletonMeta
 
 
-
+import json
+import requests
+import re
+from hotglue_singer_sdk.helpers._util import utc_now
+from hotglue_etl_exceptions import InvalidCredentialsError
 
 
 class MarketoAuthenticator(OAuthAuthenticator, metaclass=SingletonMeta):
@@ -33,3 +37,43 @@ class MarketoAuthenticator(OAuthAuthenticator, metaclass=SingletonMeta):
             stream=stream,
             auth_endpoint=urljoin(base_url, "identity/oauth/token"),
         )
+    
+    def update_access_token_locally(self) -> None:
+        """Update `access_token` locally."""
+
+        request_time = utc_now()
+        auth_request_payload = self.oauth_request_payload
+        token_response = requests.post(self.auth_endpoint, data=auth_request_payload, auth=self.request_auth())
+        try:
+            token_response.raise_for_status()
+            token_text = token_response.text or ""
+            token_text = re.sub(r'("access_token"\s*:\s*")([^"]*)(".*?"token_type")',
+                                lambda m: m.group(1) + (m.group(2)[:8] + ("*" * max(0, len(m.group(2)) - 8))) + m.group(3),
+                                token_text, count=1) or token_text
+            self.logger.info(f"OAuth authorization attempt was successful, response was '{token_text}'")
+        except Exception as ex:
+            raise InvalidCredentialsError(
+                f"Failed OAuth login, response was '{token_response.text}'. {ex}"
+            )
+        token_json = token_response.json()
+        self.access_token = token_json["access_token"]
+        expires_in = token_json.get("expires_in", self._default_expiration)
+        if expires_in is None:
+            self.expires_in = None
+            self.logger.debug(
+                "No expires_in received in OAuth response and no "
+                "default_expiration set. Token will be treated as if it is "
+                "expired."
+            )
+        else:
+            self.expires_in = int(expires_in) + int(request_time.timestamp())
+        
+        self.last_refreshed = request_time
+        # Update the tap config with the new access_token
+        self._tap._config["access_token"] = token_json["access_token"]
+        self._tap._config["expires_in"] = self.expires_in
+
+        # Write the updated config back to the file (only when config was loaded from a path)
+        if self._tap.config_file is not None:
+            with open(self._tap.config_file, "w") as outfile:
+                json.dump(self._tap._config, outfile, indent=4)
