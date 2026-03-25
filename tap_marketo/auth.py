@@ -57,16 +57,19 @@ class MarketoAuthenticator(OAuthAuthenticator, metaclass=SingletonMeta):
             )
         token_json = token_response.json()
         self.access_token = token_json["access_token"]
-        expires_in = int(token_json.get("expires_in", self._default_expiration))
-        self.expires_in = expires_in + int(request_time.timestamp())
-        if self.expires_in is None:
+        expires_in = token_json.get("expires_in", self._default_expiration)
+        if expires_in is None:
+            self.expires_in = None
             self.logger.debug(
-                "No expires_in receied in OAuth response and no "
-                "default_expiration set. Token will be treated as if it never "
-                "expires."
+                "No expires_in received in OAuth response and no "
+                "default_expiration set. Token will be treated as if it is "
+                "expired."
             )
+        else:
+            self.expires_in = int(expires_in) + int(request_time.timestamp())
+        
         self.last_refreshed = request_time
-        # Update the tap config with the new access_token and refresh_token
+        # Update the tap config with the new access_token
         self._tap._config["access_token"] = token_json["access_token"]
         self._tap._config["expires_in"] = self.expires_in
 
