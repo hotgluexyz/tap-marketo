@@ -11,6 +11,8 @@ from hotglue_singer_sdk.authenticators import OAuthAuthenticator, SingletonMeta
 import json
 import requests
 import re
+from singer import utils
+import time
 from hotglue_singer_sdk.helpers._util import utc_now
 from hotglue_etl_exceptions import InvalidCredentialsError
 
@@ -77,3 +79,26 @@ class MarketoAuthenticator(OAuthAuthenticator, metaclass=SingletonMeta):
         if self._tap.config_file is not None:
             with open(self._tap.config_file, "w") as outfile:
                 json.dump(self._tap._config, outfile, indent=4)
+
+    def is_token_valid(self) -> bool:
+        """Check if token is valid.
+
+        Returns:
+            True if the token is valid (fresh).
+        """
+        # if expires_in is not set, try to get it from the tap config
+        if self.expires_in is None and self._tap.config.get("expires_in"):
+            self.expires_in = self._tap.config.get("expires_in")
+
+        if self.last_refreshed is None:
+            return False
+        if not self.expires_in:
+            return False
+
+        seconds_left = self.expires_in - int(utc_now().timestamp())
+        if seconds_left <= 2:
+            self.logger.info(f"Access token expires in {seconds_left} seconds; waiting so it fully expires before refreshing.")
+            time.sleep(seconds_left + 2)
+            return False
+        else:
+            return True
