@@ -97,8 +97,9 @@ class MarketoAuthenticator(OAuthAuthenticator, metaclass=SingletonMeta):
 
         seconds_left = self.expires_in - int(utc_now().timestamp())
         if seconds_left <= 2:
-            self.logger.info(f"Access token expires in {seconds_left} seconds; waiting so it fully expires before refreshing.")
-            time.sleep(seconds_left + 2)
+            if seconds_left >= 0:
+                self.logger.info(f"Access token expires in {seconds_left} seconds; waiting so it fully expires before refreshing.")
+                time.sleep(seconds_left + 2)            
             return False
-        else:
-            return True
+            
+        return True
