@@ -7,7 +7,7 @@ import os
 import tempfile
 from datetime import datetime, timedelta, timezone
 from typing import Any, Iterable
-from urllib.parse import urljoin
+from urllib.parse import urljoin, urlparse
 import polars as pl
 from hotglue_singer_sdk.streams import AsyncRESTStream, RESTStream
 import requests
@@ -64,13 +64,15 @@ class MarketoRESTStream(RESTStream):
             errors = resp_json.get("errors")
             status_code = int(errors[0].get("code"))
             msg = errors[0].get("message")
+            full_path = urlparse(response.url).path or self.path
+            error_msg = f"{status_code} Error: {msg} for path: {full_path}"
             if (
                 status_code in self.extra_retry_statuses
                 or 500 <= status_code < 600
             ):
-                raise RetriableAPIError(msg, response)
+                raise RetriableAPIError(error_msg, response)
             else:
-                raise FatalAPIError(msg)
+                raise FatalAPIError(error_msg)
     
     def parse_response(self, response):
         payload = response.json()
