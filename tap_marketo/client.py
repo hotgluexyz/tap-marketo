@@ -20,7 +20,7 @@ from tap_marketo.auth import MarketoAuthenticator
 class MarketoRESTStream(RESTStream):
     """Base for Marketo streams that use sync REST not async jobs."""
     next_page_token_jsonpath = "$.nextPageToken"
-    extra_retry_statuses = [429, 601, 602]
+    extra_retry_statuses = [429, 601, 602, 604, 606, 608, 611, 614, 615, 713]
 
     def __init__(self, *args, **kwargs):
         self._http_headers: dict = {}
@@ -69,7 +69,7 @@ class MarketoRESTStream(RESTStream):
                 or 500 <= status_code < 600
             ):
                 raise RetriableAPIError(msg, response)
-            elif 400 <= status_code < 500:
+            else:
                 raise FatalAPIError(msg)
     
     def parse_response(self, response):
