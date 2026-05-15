@@ -54,7 +54,7 @@ class MarketoRESTStream(RESTStream):
         return super()._request(prepared_request, context)
 
     def validate_response(self, response: requests.Response) -> None:
-        super().validate_response(response) 
+        super().validate_response(response)
         try:
             resp_json = response.json()
         except requests.exceptions.JSONDecodeError:
