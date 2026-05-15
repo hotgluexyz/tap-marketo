@@ -109,7 +109,7 @@ class MarketoAsyncRESTStream(MarketoRESTStream, AsyncRESTStream):
     primary_keys = ["id"]
     replication_key = "updatedAt"
 
-    parallelization_limit = 1 # TODO: increase to 3; only here to debug
+    parallelization_limit = 3
 
     bulk_export_create_path: str | None = None
     bulk_export_enqueue_path: str | None = None
