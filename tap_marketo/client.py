@@ -7,12 +7,12 @@ import os
 import tempfile
 from datetime import datetime, timedelta, timezone
 from typing import Any, Iterable
-from urllib.parse import urljoin
+from urllib.parse import urljoin, urlparse
 import polars as pl
 from hotglue_singer_sdk.streams import AsyncRESTStream, RESTStream
 import requests
 from hotglue_singer_sdk.typing import AsyncJobStatus
-from hotglue_singer_sdk.exceptions import FatalAPIError
+from hotglue_singer_sdk.exceptions import FatalAPIError, RetriableAPIError
 from memoization import cached
 from tap_marketo.auth import MarketoAuthenticator
 
@@ -20,6 +20,7 @@ from tap_marketo.auth import MarketoAuthenticator
 class MarketoRESTStream(RESTStream):
     """Base for Marketo streams that use sync REST not async jobs."""
     next_page_token_jsonpath = "$.nextPageToken"
+    extra_retry_statuses = [429, 601, 602, 604, 606, 608, 611, 614, 615, 713]
 
     def __init__(self, *args, **kwargs):
         self._http_headers: dict = {}
@@ -40,16 +41,39 @@ class MarketoRESTStream(RESTStream):
     def authenticator(self):
         """Return stream authenticator."""
         return MarketoAuthenticator.create_for_stream(self)
+    
+    @property
+    def default_headers(self) -> dict:
+        return {
+            **self.authenticator.auth_headers
+        }
+
+    def _request(self, prepared_request, context):
+        # refresh/check token on every retry attempt
+        prepared_request.headers.update(self.default_headers)
+        return super()._request(prepared_request, context)
 
     def validate_response(self, response: requests.Response) -> None:
         super().validate_response(response)
+        resp_json = None
         try:
             resp_json = response.json()
-            if resp_json.get("success") is False:
-                errors = resp_json.get("errors") or resp_json
-                raise FatalAPIError(f"Marketo API error for stream '{self.name}': {errors}")
         except requests.exceptions.JSONDecodeError:
             pass
+        
+        if resp_json and resp_json.get("success") is False:
+            errors = resp_json.get("errors")
+            status_code = int(errors[0].get("code"))
+            msg = errors[0].get("message")
+            full_path = urlparse(response.url).path or self.path
+            error_msg = f"{status_code} Error: {msg} for path: {full_path}"
+            if (
+                status_code in self.extra_retry_statuses
+                or 500 <= status_code < 600
+            ):
+                raise RetriableAPIError(error_msg, response)
+            else:
+                raise FatalAPIError(error_msg)
     
     def parse_response(self, response):
         payload = response.json()
@@ -95,11 +119,6 @@ class MarketoAsyncRESTStream(MarketoRESTStream, AsyncRESTStream):
     bulk_export_status_path: str | None = None
     bulk_export_results_path: str | None = None
 
-    @property
-    def default_headers(self) -> dict:
-        return {
-            **self.authenticator.auth_headers
-        }
 
     def get_paging_windows(self, context: dict | None) -> list[dict[str, Any]]:
         start_date = self.get_starting_time(context, is_inclusive=True)
