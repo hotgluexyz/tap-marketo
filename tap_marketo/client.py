@@ -55,12 +55,13 @@ class MarketoRESTStream(RESTStream):
 
     def validate_response(self, response: requests.Response) -> None:
         super().validate_response(response)
+        resp_json = None
         try:
             resp_json = response.json()
         except requests.exceptions.JSONDecodeError:
-            raise FatalAPIError(f"Marketo API error for stream '{self.name}': invalid JSON response: {response.text}")
+            pass
         
-        if resp_json.get("success") is False:
+        if resp_json and resp_json.get("success") is False:
             errors = resp_json.get("errors")
             status_code = int(errors[0].get("code"))
             msg = errors[0].get("message")
